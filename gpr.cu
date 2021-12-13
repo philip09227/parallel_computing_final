@@ -182,7 +182,7 @@ int main(int argc, char* argv[])
 	matrix_node * device_grid;
         cudaMalloc((void **)&device_grid, (n+1)*sizeof(matrix_node));
 	cudaMemcpy(device_grid, grid, (n+1)*sizeof(matrix_node),cudaMemcpyHostToDevice);
-        //checkGpuMem();
+        
 	
 	// allocate matrix in device memory 
 	// allocate device memovry for observed points value whis is n*1
