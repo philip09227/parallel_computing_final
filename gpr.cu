@@ -114,6 +114,133 @@ void construct_matrix_k_pred(double ** matrix_k_pred, matrix_node* grid, int n)
 
 }
 
+void initialize_identity_matrix(double ** identity_matrix, int n)
+{
+	for(int i=0; i<n; i++)
+	{
+		for(int j=0; j<n; j++)
+		{
+			if(i==j)
+			{	
+				identity_matrix[i][j]=1*t;
+			}
+			else
+			{	
+			 	identity_matrix[i][j] = 0*t;
+			}
+		}
+	}	
+}
+
+
+void compute_A( double** matrix_A, double** identity_matrix, double** matrix_k, int n)
+{
+	for( int i=0; i<n; i++)
+	{
+		for(int j=0; j<n; j++)
+		{	
+			matrix_A[i][j] = identity_matrix[i][j]+matrix_k[i][j];
+		}
+	}	
+}
+
+// inverse matrix A-1 = adjA/|A|
+//adjA = 
+//void inverse_matrix()
+
+
+void LU_Factorization( double ** matrix_A ,double** matrix_U,double** matrix_L, int n)
+{
+	int i,j,k;
+    for(j=0; j<n; j++)
+    {
+        for(i=0; i<n; i++)
+        {
+            if(i<=j)
+            {
+                matrix_U[i][j]=matrix_A[i][j];
+                for(k=0; k<i-1; k++)
+                   matrix_U[i][j]-=matrix_L[i][k]*matrix_U[k][j];
+                if(i==j)
+                    matrix_L[i][j]=1;
+                else
+                    matrix_L[i][j]=0;
+            }
+            else
+            {
+                matrix_L[i][j]=matrix_A[i][j];
+                for(k=0; k<=j-1; k++)
+                    matrix_L[i][j]-=matrix_L[i][k]*matrix_U[k][j];
+                matrix_L[i][j]/=matrix_U[j][j];
+                matrix_U[i][j]=0;
+            }
+        }
+    }
+}
+
+
+void calculate_y(double ** matrix_f, double ** matrix_y,double ** matrix_L,int n)
+{
+	int i,j;
+    for(i=0; i<n; i++)
+    {
+        matrix_y[i][0]=matrix_f[i][0];
+        for(j=0; j<i; j++)
+        {
+            matrix_y[i][0]-=matrix_L[i][j]*matrix_y[j][0];
+        }
+    }
+}
+
+void calculate_x(double ** matrix_y, double ** matrix_x,double ** matrix_U,int n)
+{
+        int i,j;
+    for(i=n-1; i>=0; i--)
+    {
+        matrix_x[i][0]=matrix_y[i][0];
+        for(j=i+1; j<n; j++)
+        {
+            matrix_x[i][0]-=matrix_U[i][j]*matrix_x[j][0];
+        }
+	matrix_x[i][0]/=matrix_U[i][i];
+    }
+}
+
+
+void transpose(double ** matrix_k_pred, double ** matrix_k_pred_transpose, int r,int c )
+{
+	for (int i = 0; i < r; ++i)
+  	for (int j = 0; j < c; ++j) 
+	{
+    	matrix_k_pred_transpose[j][i] = matrix_k_pred[i][j];
+  	}
+}
+
+
+void multiplyMatrices( double ** matrix1,
+                      double ** matrix2,
+                      double ** result,
+                      int r1, int c1, int r2, int c2) {
+
+   // Initializing elements of matrix mult to 0.
+   for (int i = 0; i < r1; ++i) {
+      for (int j = 0; j < c2; ++j) {
+         result[i][j] = 0;
+      }
+   }
+
+   // Multiplying first and second matrices and storing it in result
+   for (int i = 0; i < r1; ++i) {
+      for (int j = 0; j < c2; ++j) {
+         for (int k = 0; k < c1; ++k) {
+            result[i][j] += matrix1[i][k] * matrix2[k][j];
+         }
+      }
+   }
+}
+
+
+
 void print_matrix (double** matrix, int row, int col)
 {
     printf("\n ---------------------  --------------------- \n");
@@ -156,14 +283,13 @@ int main(int argc, char* argv[])
 	// grid 1/m+1
 	matrix_node * grid = (matrix_node * ) malloc((n+1)* sizeof(matrix_node));
 	initialize_grid_points(grid,m);
-
+	print_points(grid,m);
 
 	
 	
 	// observed matrix
 	double** matrix = allocate_matrix(n,1);
 	assign_observed_value( matrix, grid,m);
-	print_points(grid,m);
 	print_matrix(matrix,n,1);
 	
 	// k n*n matrix
@@ -190,5 +316,36 @@ int main(int argc, char* argv[])
 	cudaMalloc((void **) device_observed_points, n*sizeof(double *));
 	cudaMemcpy(device_observed_points,matrix, n*sizeof(double *),cudaMemcpyHostToDevice);
 	checkGpuMem();
+	
+	//initialise n*n identity matrix
+	double ** identity_matrix = allocate_matrix(n,n);
+	initialize_identity_matrix(identity_matrix,n);
+	print_matrix(identity_matrix,n,n);	
+	
+	// computer A	
+	double ** matrix_A = allocate_matrix(n,n);	
+	compute_A( matrix_A, identity_matrix, matrix_k,n);
+	print_matrix(matrix_A,n,n);
+
+	double ** matrix_U = allocate_matrix(n,n);
+	double ** matrix_L = allocate_matrix(n,n);
+	LU_Factorization(matrix_A , matrix_U,matrix_L,n);
+	print_matrix(matrix_L,n,n);
+	print_matrix(matrix_U,n,n);
+		
+	double ** matrix_x = allocate_matrix(n,1);
+        double ** matrix_y = allocate_matrix(n,1);
+	calculate_y(matrix, matrix_y,matrix_L, n);
+	calculate_x(matrix_y,matrix_x, matrix_U, n);
+	print_matrix(matrix_x,n,1);
+	
+	double** matrix_k_pred_transpose = allocate_matrix(1,n);
+	transpose(matrix_k_pred, matrix_k_pred_transpose,n,1);
+	print_matrix(matrix_k_pred_transpose,1,n);	
+	
+	double** result = allocate_matrix(1,1);
+	multiplyMatrices(matrix_k_pred_transpose,matrix_x,result,1,n,n,1);
+	print_matrix(result,1,1);
+
 
 }
