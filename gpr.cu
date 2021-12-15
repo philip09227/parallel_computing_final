@@ -6,7 +6,7 @@
 #define t 0.01
 #define l1 1
 #define l2 1
-#define BLOCK_SIZE 16
+#define BLOCK_SIZE 2
 extern "C"
 using namespace std;
 
@@ -109,10 +109,10 @@ void compute_A( double* matrix_A, double* identity_matrix, double* matrix_k, int
 
 __global__ void LU_Factorization(double * matrix_A ,double* matrix_U,double* matrix_L, int n)
 {
-	int row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
-    	int col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-    	printf(" row is %d\n " , row);
-	printf(" col  is %d \n" , col);
+	int row = blockIdx.y *   BLOCK_SIZE + threadIdx.y;
+    	int col = blockIdx.x *   BLOCK_SIZE + threadIdx.x;
+    	//printf(" row is %d\n " , row);
+	//printf(" col  is %d \n" , col);
 	int tmp = 0;
     	int idx;
         //int index,index_3,index_2,index_4;
@@ -120,13 +120,15 @@ __global__ void LU_Factorization(double * matrix_A ,double* matrix_U,double* mat
         //matrix_U[gid][0] = 1;
 
 
-
+	
         //printf("matrix A is %d \n", matrix_A[gid][0]);
     	for (int i = 0; i < n; i++)
     	{
         	// Upper Triangular
-		if ( row >=i)
+		if ( row >=i && row <n)
 		{	
+			printf(" row is %d\n " , row);
+        		printf(" col  is %d \n" , col);
 			int sum=0;
 			if (col < i)
 			{	
@@ -156,24 +158,25 @@ __global__ void LU_Factorization(double * matrix_A ,double* matrix_U,double* mat
        
     	}
   
-
+	
 }
 
 __global__ void calculate_y(double * matrix_f, double * matrix_y, double * matrix_L,int n)
 {
-	int row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
-        int col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+	int row = blockIdx.y * blockDim.y + threadIdx.y;
+        int col = blockIdx.x * blockDim.x + threadIdx.x;
 	int i,j,index;
 	printf(" y row is %d %d \n " , row, threadIdx.y);
         printf(" y col  is %d \n" , col);
-	
+	if ( row < n)
+	{	
 		matrix_y[row]=matrix_f[row];
-		if(col < row)
+		if(col < row )
 		{
         		matrix_y[row]-=matrix_L[row*n+col]*matrix_y[col];
        	 	}
 		__syncthreads();	
-	
+	}
     	
 }
 
@@ -319,8 +322,13 @@ int main(int argc, char* argv[])
 	cudaMemcpy(device_matrix_A, matrix_A, sizeof(double)*n*n, cudaMemcpyHostToDevice);
 	
 	// we use one block ezch block is n*n 
-	dim3 dimBlock(n,n);
-	LU_Factorization<<<1,dimBlock>>>(device_matrix_A ,device_matrix_U, device_matrix_L,n);
+	
+//	unsigned int grid_rows = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+  //  	unsigned int grid_cols = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    //	dim3 dimGrid(grid_cols, grid_rows);
+    	dim3 dimBlock(n, n);
+	
+	LU_Factorization<<<m, dimBlock>>>(device_matrix_A ,device_matrix_U, device_matrix_L,n);
 	cudaMemcpy(matrix_L, device_matrix_L, sizeof(double)*n*n, cudaMemcpyDeviceToHost);
 	cudaMemcpy(matrix_U, device_matrix_U, sizeof(double)*n*n, cudaMemcpyDeviceToHost);
 	//cudaThreadSynchronize();
@@ -338,7 +346,7 @@ int main(int argc, char* argv[])
         cudaMalloc((void **) &device_matrix_y, sizeof(double)*n);
 
 	//calculate matrix y 
-	calculate_y<<<1,dimBlock>>>(device_observed_points, device_matrix_y,device_matrix_L, n);
+	calculate_y<<<m, dimBlock>>>(device_observed_points, device_matrix_y,device_matrix_L, n);
 	cudaMemcpy(matrix_y, device_matrix_y, sizeof(double)*n, cudaMemcpyDeviceToHost);
 	print_matrix(matrix_y,n);
 
