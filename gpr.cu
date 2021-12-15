@@ -6,7 +6,7 @@
 #define t 0.01
 #define l1 1
 #define l2 1
-#define BLOCK_SIZE 2
+#define BLOCK_SIZE 16
 extern "C"
 using namespace std;
 
@@ -109,10 +109,11 @@ void compute_A( double* matrix_A, double* identity_matrix, double* matrix_k, int
 
 __global__ void LU_Factorization(double * matrix_A ,double* matrix_U,double* matrix_L, int n)
 {
-	int row = blockIdx.y *   BLOCK_SIZE + threadIdx.y;
-    	int col = blockIdx.x *   BLOCK_SIZE + threadIdx.x;
+	int row = blockIdx.y *  blockDim.y + threadIdx.y;
+    	int col = blockIdx.x *   blockDim.x + threadIdx.x;
     	//printf(" row is %d\n " , row);
 	//printf(" col  is %d \n" , col);
+	int gid = n * row + col;
 	int tmp = 0;
     	int idx;
         //int index,index_3,index_2,index_4;
@@ -122,37 +123,38 @@ __global__ void LU_Factorization(double * matrix_A ,double* matrix_U,double* mat
 
 	
         //printf("matrix A is %d \n", matrix_A[gid][0]);
-    	for (int i = 0; i < n; i++)
-    	{
+    	//for (int i = 0; i < n; i++)
+    	if(row<n)
+	{
         	// Upper Triangular
-		if ( row >=i && row <n)
+		if ( col >=row && col <n)
 		{	
-			printf(" row is %d\n " , row);
-        		printf(" col  is %d \n" , col);
+	//		printf(" row is %d\n " , row);
+        //		printf(" col  is %d \n" , col);
 			int sum=0;
-			if (col < i)
+			for( int j =0; i <row; j++)
 			{	
-				sum += ( matrix_L[i*n+col] * matrix_U[col*n+row]);
+				sum += ( matrix_L[row*n+j] * matrix_U[j*n+col]);
 			}
-			matrix_U[i*n+row] = matrix_A[i*n+col]-sum;
+			matrix_U[row*n+col] = matrix_A[row*n+col]-sum;
 			__syncthreads(); 
        
-            		if (i == row)
+            		if (row == col)
 			{
-                		matrix_L[i*n+i] = 1; // Diagonal as 1
+                		matrix_L[row*n+row] = 1; // Diagonal as 1
             		}
 			else
             		{
                 	// Summation of L(k, j) * U(j, i)
                 		int sum = 0;
-                		if( col <i)
+                		for(int j=0; j<row;j++)
 				{
 
-                    			sum += (matrix_L[row*n+col] * matrix_U[row*n+col]);
+                    			sum += (matrix_L[col*n+j] * matrix_U[col*n+j]);
                 		}
-                		matrix_L[row*n+i] = (matrix_A[row*n+i] - sum) / matrix_U[i*n+i];
+                		matrix_L[col*n+row] = (matrix_A[col*n+row] - sum) / matrix_U[row*n+row];
             		}
-		
+			__syncthreads();		
         	}
 
        
@@ -163,11 +165,11 @@ __global__ void LU_Factorization(double * matrix_A ,double* matrix_U,double* mat
 
 __global__ void calculate_y(double * matrix_f, double * matrix_y, double * matrix_L,int n)
 {
-	int row = blockIdx.y * blockDim.y + threadIdx.y;
-        int col = blockIdx.x * blockDim.x + threadIdx.x;
+	int row = blockIdx.y *blockDim.y + threadIdx.y;
+        int col = blockIdx.x * blockDim.x+ threadIdx.x;
 	int i,j,index;
-	printf(" y row is %d %d \n " , row, threadIdx.y);
-        printf(" y col  is %d \n" , col);
+//	printf(" y row is %d %d \n " , row, threadIdx.y);
+  //      printf(" y col  is %d \n" , col);
 	if ( row < n)
 	{	
 		matrix_y[row]=matrix_f[row];
@@ -258,12 +260,20 @@ void print_matrix (double* matrix, int size)
     printf("\n");
 }
 
-int main(int argc, char* argv[])
+int main()
 {
 	int m;
 	int n;
-	m = atoi(argv[1]);
+	m = 5;
 	n = m*m;
+	float gpu_elapsed_time_ms;
+	cudaEvent_t start, stop;
+    	cudaEventCreate(&start);
+    	cudaEventCreate(&stop);
+
+    // start to count execution time of GPU version
+    	cudaEventRecord(start, 0);
+	
 	matrix_node *grid;
 	cudaMallocHost((void **) &grid, sizeof(matrix_node)*m*m);
 	initialize_grid_points( grid,m); 
@@ -313,11 +323,11 @@ int main(int argc, char* argv[])
 
 
 	// allocate device memory for matrix A n*n
-	double * device_matrix_A;
+	 double * device_matrix_A;
 	cudaMalloc((void **) &device_matrix_A, sizeof(double)*n*n);
-	double * device_matrix_L;
+	 double * device_matrix_L;
         cudaMalloc((void **) &device_matrix_L, sizeof(double)*n*n);
-	double * device_matrix_U;
+	 double * device_matrix_U;
         cudaMalloc((void **) &device_matrix_U, sizeof(double)*n*n);
 	cudaMemcpy(device_matrix_A, matrix_A, sizeof(double)*n*n, cudaMemcpyHostToDevice);
 	
@@ -326,9 +336,9 @@ int main(int argc, char* argv[])
 //	unsigned int grid_rows = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
   //  	unsigned int grid_cols = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
     //	dim3 dimGrid(grid_cols, grid_rows);
-    	dim3 dimBlock(n, n);
+    	dim3 dimBlock(n,n );
 	
-	LU_Factorization<<<m, dimBlock>>>(device_matrix_A ,device_matrix_U, device_matrix_L,n);
+	LU_Factorization<<<1, dimBlock>>>(device_matrix_A ,device_matrix_U, device_matrix_L,n);
 	cudaMemcpy(matrix_L, device_matrix_L, sizeof(double)*n*n, cudaMemcpyDeviceToHost);
 	cudaMemcpy(matrix_U, device_matrix_U, sizeof(double)*n*n, cudaMemcpyDeviceToHost);
 	//cudaThreadSynchronize();
@@ -372,5 +382,15 @@ int main(int argc, char* argv[])
 
 	multiplyMatrices(matrix_k_pred_transpose,matrix_x,result,1,n,n,1);
 	print_matrix(result,1);
+
+	cudaEventRecord(stop, 0);
+    	cudaEventSynchronize(stop);
+
+    // compute time elapse on GPU computing
+    	cudaEventElapsedTime(&gpu_elapsed_time_ms, start, stop);
+    	printf("Time elapsed on LU Factorization  on GPU: %f ms.\n\n",gpu_elapsed_time_ms);
+
+    // start the CPU version
+    	
 }
 
