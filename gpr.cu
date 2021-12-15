@@ -17,6 +17,8 @@ struct matrix_node
 };
 
 __global__ void LU_Factorization(double * matrix_A ,double* matrix_U,double* matrix_L, int n);
+__global__ void calculate_y(double * matrix_f, double * matrix_y, double * matrix_L,int n);
+__global__ void calculate_x(double * matrix_y, double * matrix_x,double * matrix_U,int n);
 void initialize_grid_points(matrix_node *grid, int m)
 {
 	for(int i=0; i<m; i++)
@@ -29,6 +31,20 @@ void initialize_grid_points(matrix_node *grid, int m)
                         
 		}	
 	}		
+}
+
+void assign_observed_value( double * matrix, matrix_node* grid, int m)
+{
+	int index = 0; 
+	for( int i=0; i<m; i++)
+	{
+		for(int j=0; j<m; j++)			
+		{
+			//printf("%lf\n",((double)rand()/(10.0 * (double)RAND_MAX)) - 0.05);
+		    matrix[index] = 1 - (((grid[i*m+j].x - 0.5)*(grid[i*m+j].x - 0.5)) + ((grid[i*m+j].y - 0.5)*(grid[i*m+j].y-0.5))) + (((double)rand()/(10.0 * (double)RAND_MAX)) - 0.05);
+			index++;	
+		}
+	} 
 }
 
 void construct_matrix_k( double *matrix_k, matrix_node* grid, int n)
@@ -93,49 +109,121 @@ void compute_A( double* matrix_A, double* identity_matrix, double* matrix_k, int
 
 __global__ void LU_Factorization(double * matrix_A ,double* matrix_U,double* matrix_L, int n)
 {
-	//int row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
-    	//int col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-    	//int tmp = 0;
-    	//int idx;
-        int index,index_3,index_2,index_4;
+	int row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
+    	int col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+    	printf(" row is %d\n " , row);
+	printf(" col  is %d \n" , col);
+	int tmp = 0;
+    	int idx;
+        //int index,index_3,index_2,index_4;
         int i,j,k;
         //matrix_U[gid][0] = 1;
+
+
 
         //printf("matrix A is %d \n", matrix_A[gid][0]);
     	for (int i = 0; i < n; i++)
     	{
         	// Upper Triangular
-        	for (int k = i; k < n; k++)
-        	{
-            		// Summation of L(i, j) * U(j, k)
-            		int sum = 0;
-            		for (int j = 0; j < i; j++)
-                	{
-                		sum += (matrix_L[i*n+j] * matrix_U[j*n+k]);
-                	}
-			matrix_U[i*n+k] = matrix_A[i*n+k] - sum;
-        	}	
- 
-        // Lower Triangular
-        	for (int k = i; k < n; k++)
-        	{
-            		if (i == k)
+		if ( row >=i)
+		{	
+			int sum=0;
+			if (col < i)
+			{	
+				sum += ( matrix_L[i*n+col] * matrix_U[col*n+row]);
+			}
+			matrix_U[i*n+row] = matrix_A[i*n+col]-sum;
+			__syncthreads(); 
+       
+            		if (i == row)
+			{
                 		matrix_L[i*n+i] = 1; // Diagonal as 1
-            		else
+            		}
+			else
             		{
                 	// Summation of L(k, j) * U(j, i)
                 		int sum = 0;
-                		for (int j = 0; j < i; j++)
-                    			sum += (matrix_L[k*n+j] * matrix_U[k*n+j]);
-                // Evaluating L(k, i)
-                		matrix_L[k*n+i] = (matrix_A[k*n+i] - sum) / matrix_U[i*n+i];
+                		if( col <i)
+				{
+
+                    			sum += (matrix_L[row*n+col] * matrix_U[row*n+col]);
+                		}
+                		matrix_L[row*n+i] = (matrix_A[row*n+i] - sum) / matrix_U[i*n+i];
             		}
+		
         	}
+
        
-    }
+    	}
   
 
 }
+
+__global__ void calculate_y(double * matrix_f, double * matrix_y, double * matrix_L,int n)
+{
+	int row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
+        int col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+	int i,j,index;
+	printf(" y row is %d %d \n " , row, threadIdx.y);
+        printf(" y col  is %d \n" , col);
+	
+		matrix_y[row]=matrix_f[row];
+		if(col < row)
+		{
+        		matrix_y[row]-=matrix_L[row*n+col]*matrix_y[col];
+       	 	}
+		__syncthreads();	
+	
+    	
+}
+
+__global__ void calculate_x(double * matrix_y, double * matrix_x,double * matrix_U,int n)
+{
+        int row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
+        int col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+	
+        matrix_x[row]=matrix_y[row];
+        if(col>=row)
+        {	
+			
+            matrix_x[row]-=matrix_U[row*n+col]*matrix_x[col];
+       } 
+	matrix_x[row]/=matrix_U[row*n+row];
+}
+
+
+void transpose(double * matrix_k_pred, double * matrix_k_pred_transpose, int r,int c )
+{
+ for (int i = 0; i < r; ++i)
+   for (int j = 0; j < c; ++j) 
+ {
+     matrix_k_pred_transpose[j*r+i] = matrix_k_pred[i*c+j];
+   }
+}
+
+
+void multiplyMatrices( double * matrix1,
+                      double * matrix2,
+                      double * result,
+                      int r1, int c1, int r2, int c2) {
+
+   // Initializing elements of matrix mult to 0.
+   for (int i = 0; i < r1; ++i) {
+      for (int j = 0; j < c2; ++j) {
+         result[i*c2+j] = 0;
+      }
+   }
+
+   // Multiplying first and second matrices and storing it in result
+   for (int i = 0; i < r1; ++i) {
+      for (int j = 0; j < c2; ++j) {
+         for (int k = 0; k < c1; ++k) {
+            result[i*c2+j] += matrix1[i*c1+k] * matrix2[k*c2+j];
+         }
+      }
+   }
+}
+
 void print_matrix (double* matrix, int size)
 {
     printf("\n ---------------------  --------------------- \n");
@@ -164,6 +252,14 @@ int main(int argc, char* argv[])
 	// observed matrix n*1
 	double *observed_points;
 	cudaMallocHost((void **) &observed_points, sizeof(double)*n); 
+	assign_observed_value( observed_points, grid,  m);
+	
+	double *device_observed_points;
+        cudaMalloc((void **) &device_observed_points, sizeof(double)*n);
+	cudaMemcpy(device_observed_points, observed_points, sizeof(double)*n, cudaMemcpyHostToDevice);
+	printf(" print observed points \n");	
+	print_matrix(observed_points,n);
+
 	// k matrix_k n*n
 	double *matrix_k;
 	cudaMallocHost((void **) &matrix_k, sizeof(double)*(n*n));
@@ -195,9 +291,6 @@ int main(int argc, char* argv[])
 	//allocate matrix_L n*n for return from device to host
 	double * matrix_L;
         cudaMallocHost((void **) &matrix_L, sizeof(double)*(n*n));	
-	//LU_Factorization(matrix_A ,matrix_U,matrix_L, n);
-	//print_matrix(matrix_U,n*n);
- 	//print_matrix(matrix_L,n*n);
 
 
 	// allocate device memory for matrix A n*n
@@ -209,15 +302,49 @@ int main(int argc, char* argv[])
         cudaMalloc((void **) &device_matrix_U, sizeof(double)*n*n);
 	cudaMemcpy(device_matrix_A, matrix_A, sizeof(double)*n*n, cudaMemcpyHostToDevice);
 	
-	unsigned int grid_rows = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    	unsigned int grid_cols = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    	dim3 dimGrid(grid_cols, grid_rows);
-    	dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-	cudaMemcpy(matrix_U, device_matrix_A, sizeof(double)*n*n, cudaMemcpyDeviceToHost);
-	//LU_Factorization(devic_matrix_A ,device_matrix_U, device_matrix_L,n)
+	// we use one block ezch block is n*n 
+	dim3 dimBlock(n,n);
+	LU_Factorization<<<1,dimBlock>>>(device_matrix_A ,device_matrix_U, device_matrix_L,n);
+	cudaMemcpy(matrix_L, device_matrix_L, sizeof(double)*n*n, cudaMemcpyDeviceToHost);
+	cudaMemcpy(matrix_U, device_matrix_U, sizeof(double)*n*n, cudaMemcpyDeviceToHost);
 	//cudaThreadSynchronize();
-	//print_matrix(matrix_A,n*n);
-	printf("copy device matrix a back to host \n"); 
-	print_matrix(matrix_U,n*n);
+	
+	printf("copy device matrix L a back to host \n"); 
+	print_matrix(matrix_L,n*n);
+	printf("copy device matrix U a back to host \n");
+        print_matrix(matrix_U,n*n);
+
+
+	// allocate matrix_y for Ly=b y = n*1
+	double *matrix_y;
+        cudaMallocHost((void **) &matrix_y, sizeof(double)*n);
+	double *device_matrix_y;
+        cudaMalloc((void **) &device_matrix_y, sizeof(double)*n);
+
+	//calculate matrix y 
+	calculate_y<<<1,dimBlock>>>(device_observed_points, device_matrix_y,device_matrix_L, n);
+	cudaMemcpy(matrix_y, device_matrix_y, sizeof(double)*n, cudaMemcpyDeviceToHost);
+	print_matrix(matrix_y,n);
+
+
+	//allocate matrix x Ux=y x=n*1
+	double *matrix_x;
+        cudaMallocHost((void **) &matrix_x, sizeof(double)*n);
+	double *device_matrix_x;
+        cudaMalloc((void **) &device_matrix_x, sizeof(double)*n);
+	//calculate matrix x 
+	calculate_x<<<1,dimBlock>>>(device_matrix_y,device_matrix_x, device_matrix_U, n);
+	cudaMemcpy(matrix_x, device_matrix_x, sizeof(double)*n, cudaMemcpyDeviceToHost);
+	print_matrix(matrix_x,n);
+	// allocate for matrix k predict transpose 
+	double *matrix_k_pred_transpose;
+        cudaMallocHost((void **) &matrix_k_pred_transpose, sizeof(double)*n);
+	transpose(matrix_k_pred, matrix_k_pred_transpose,n,1);
+	print_matrix(matrix_k_pred_transpose,n);	
+	double *result;
+        cudaMallocHost((void **) &result, sizeof(double)*1);
+
+	multiplyMatrices(matrix_k_pred_transpose,matrix_x,result,1,n,n,1);
+	print_matrix(result,1);
 }
 
