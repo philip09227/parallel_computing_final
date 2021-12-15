@@ -18,7 +18,7 @@ struct matrix_node
 
 __global__ void LU_Factorization(double * matrix_A ,double* matrix_U,double* matrix_L, int n);
 __global__ void calculate_y(double * matrix_f, double * matrix_y, double * matrix_L,int n);
-__global__ void calculate_x(double * matrix_y, double * matrix_x,double * matrix_U,int n);
+//__global__ void calculate_x(double * matrix_y, double * matrix_x,double * matrix_U,int n);
 void initialize_grid_points(matrix_node *grid, int m)
 {
 	for(int i=0; i<m; i++)
@@ -177,20 +177,36 @@ __global__ void calculate_y(double * matrix_f, double * matrix_y, double * matri
     	
 }
 
+void calculate_x(double * matrix_y, double * matrix_x,double * matrix_U,int n)
+{
+        int i,j;
+    for(i=n-1; i>=0; i--)
+    {
+        matrix_x[i]=matrix_y[i];
+        for(j=i+1; j<n; j++)
+        {
+            matrix_x[i]-=matrix_U[i*n+j]*matrix_x[j];
+        }
+	matrix_x[i]/=matrix_U[i];
+    }
+}
+/*
 __global__ void calculate_x(double * matrix_y, double * matrix_x,double * matrix_U,int n)
 {
         int row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
         int col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
 	
         matrix_x[row]=matrix_y[row];
-        if(col>=row)
+        if(col>row)
         {	
 			
             matrix_x[row]-=matrix_U[row*n+col]*matrix_x[col];
-       } 
+       	__syncthreads();
+	} 
+	
 	matrix_x[row]/=matrix_U[row*n+row];
 }
-
+*/
 
 void transpose(double * matrix_k_pred, double * matrix_k_pred_transpose, int r,int c )
 {
@@ -330,11 +346,13 @@ int main(int argc, char* argv[])
 	//allocate matrix x Ux=y x=n*1
 	double *matrix_x;
         cudaMallocHost((void **) &matrix_x, sizeof(double)*n);
-	double *device_matrix_x;
-        cudaMalloc((void **) &device_matrix_x, sizeof(double)*n);
+	//double *device_matrix_x;
+        //cudaMalloc((void **) &device_matrix_x, sizeof(double)*n);
 	//calculate matrix x 
-	calculate_x<<<1,dimBlock>>>(device_matrix_y,device_matrix_x, device_matrix_U, n);
-	cudaMemcpy(matrix_x, device_matrix_x, sizeof(double)*n, cudaMemcpyDeviceToHost);
+	//calculate_x<<<1,dimBlock>>>(device_matrix_y,device_matrix_x, device_matrix_U, n);
+	//cudaMemcpy(matrix_x, device_matrix_x, sizeof(double)*n, cudaMemcpyDeviceToHost);
+	
+	calculate_x( matrix_y,  matrix_x, matrix_U,n);
 	print_matrix(matrix_x,n);
 	// allocate for matrix k predict transpose 
 	double *matrix_k_pred_transpose;
